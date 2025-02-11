@@ -226,8 +226,8 @@ class GameController(
         this.gameService.closeGame(gameId)
     }
 
-    @GetMapping(path = ["/sse"], produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
-    fun subscribe(): SseEmitter? {
+    @GetMapping("/sse")
+    fun subscribe(): SseEmitter {
         return sseComponent.addSse()
     }
 }

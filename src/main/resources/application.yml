@@ -24,10 +24,10 @@ spring:
     execution:
       simple:
         concurrency-limit: 2
-logging:
-  level:
-    root: WARN
-    fr.arcure.uniting: INFO
-    org:
-      hibernate:
-        SQL: ERROR
+#logging:
+#  level:
+#    root: WARN
+#    fr.arcure.uniting: INFO
+#    org:
+#      hibernate:
+#        SQL: ERROR

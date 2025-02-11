@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import kotlin.concurrent.thread
 
+
 @Component
 class SSEComponent(private val gameMapper: GameMapper) {
     private val sses: MutableMap<Long, SseEmitter> = ConcurrentHashMap()
@@ -24,9 +25,13 @@ class SSEComponent(private val gameMapper: GameMapper) {
         objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
     }
 
-    fun addSse(): SseEmitter? {
+    fun addSse(): SseEmitter {
         val userId = CustomUser.get().userId
-        return sses.getOrPut(userId) { SseEmitter() }
+        val sseEmitter = sses.getOrPut(userId) { SseEmitter(Int.MAX_VALUE.toLong()) }
+        sseEmitter.onCompletion { sses.remove(userId) }
+        sseEmitter.onTimeout { sses.remove(userId) }
+        sseEmitter.onError { _ -> sses.remove(userId) }
+        return sseEmitter;
     }
 
     fun removeSSE(userId: Long) {
@@ -45,8 +50,12 @@ class SSEComponent(private val gameMapper: GameMapper) {
         players.forEach {
             Executors.newSingleThreadExecutor().execute(thread {
                 val userId = it.user?.id
-                val gameResponse = if (game == null) null else gameMapper.toResponse(game, it)
-                sses[userId]?.send(objectMapper.writeValueAsString(gameResponse))
+                if (game == null) {
+                    sses[userId]?.complete();
+                } else {
+                    val gameResponse = gameMapper.toResponse(game, it)
+                    sses[userId]?.send(objectMapper.writeValueAsString(gameResponse))
+                }
             })
         }
     }
