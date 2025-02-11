@@ -36,7 +36,7 @@ class GameEntity(
     var id: Long? = null,
     @Max(value = 28)
     var nbAvailableShardTokens: Int = NB_SHARD_TOKENS_MAX - NB_SHARD_TOKENS_START,
-    @OneToMany(mappedBy = "game", cascade = [(CascadeType.ALL)], fetch = FetchType.LAZY)
+    @OneToMany(mappedBy = "game", cascade = [(CascadeType.ALL)], fetch = FetchType.LAZY, orphanRemoval = true)
     var players: MutableList <PlayerEntity> = mutableListOf(),
     @Enumerated(EnumType.STRING)
     var state: GameState = GameState.START,
@@ -154,6 +154,14 @@ class GameService(
         sseComponent.notifySSE(gameEntity.players)
     }
 
+    @Transactional
+    fun quitGame(id: Long) {
+        val gameAndMyPlayer = getGameAndMyPlayer()
+        val game = gameAndMyPlayer.game
+        game.players.remove(gameAndMyPlayer.player)
+        gameRepository.save(game)
+    }
+
     fun getMyPlayer(gameEntity: GameEntity, playerPayload: PlayerPayload): PlayerEntity {
         return gameEntity.players.find { it.user?.id == CustomUser.get().userId } ?: generateMyPlayer(gameEntity, playerPayload)
     }
@@ -224,6 +232,12 @@ class GameController(
     @DeleteMapping("/{gameId}")
     fun close(@PathVariable gameId: Long) {
         this.gameService.closeGame(gameId)
+    }
+
+    @IsMyGame
+    @DeleteMapping("/{gameId}/players")
+    fun quit(@PathVariable gameId: Long) {
+        this.gameService.quitGame(gameId)
     }
 
     @GetMapping("/sse")
