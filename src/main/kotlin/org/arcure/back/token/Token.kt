@@ -81,14 +81,14 @@ class TokenMapper(@Lazy private val playerMapper: PlayerMapper) {
 
 @Service
 @Transactional(readOnly = true)
-class TokenService(
+open class TokenService(
     private val gameRepository: GameRepository,
     private val sseComponent: SSEComponent,
     private val gameMapper: GameMapper,
 ) {
 
     @Transactional
-    fun dealTokens(gameId: Long): GameResponse {
+    open fun dealTokens(gameId: Long): GameResponse {
         val game = gameRepository.getReferenceById(gameId)
         val nbPlayers = game.players.size
 
@@ -109,7 +109,7 @@ class TokenService(
     }
 
     @Transactional
-    fun giveShardToken(gameId: Long) {
+    open fun giveShardToken(gameId: Long) {
         val game = gameRepository.getReferenceById(gameId)
         val myPlayer = getMyPlayer(game)
         val myShardTokens = myPlayer.playableTokens.filter { it.type == TokenType.SHARD }.toMutableList()
@@ -128,7 +128,7 @@ class TokenService(
     }
 
     @Transactional
-    fun addShardToken(gameId: Long) {
+    open fun addShardToken(gameId: Long) {
         val game = gameRepository.getReferenceById(gameId)
         val myPlayer = getMyPlayer(game)
 

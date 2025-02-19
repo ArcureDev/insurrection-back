@@ -4,14 +4,13 @@ import fr.arcure.uniting.configuration.security.CustomUser
 import jakarta.persistence.*
 import jakarta.validation.Valid
 import jakarta.validation.constraints.Max
+import org.arcure.back.buildMatrix
 import org.arcure.back.config.SSEComponent
 import org.arcure.back.config.annotation.IsMyGame
 import org.arcure.back.flag.FlagMapper
 import org.arcure.back.flag.FlagResponse
-import org.arcure.back.player.PlayerEntity
-import org.arcure.back.player.PlayerMapper
-import org.arcure.back.player.PlayerPayload
-import org.arcure.back.player.PlayerResponse
+import org.arcure.back.matrixToString
+import org.arcure.back.player.*
 import org.arcure.back.token.NB_SHARD_TOKENS_MAX
 import org.arcure.back.token.NB_SHARD_TOKENS_START
 import org.arcure.back.token.TokenEntity
@@ -19,7 +18,6 @@ import org.arcure.back.token.TokenType
 import org.arcure.back.user.UserRepository
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Query
-import org.springframework.http.MediaType
 import org.springframework.stereotype.Component
 import org.springframework.stereotype.Repository
 import org.springframework.stereotype.Service
@@ -27,6 +25,9 @@ import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.util.*
+import java.util.stream.IntStream
+import kotlin.math.min
+import kotlin.streams.toList
 
 @Entity
 @Table(name = "game")
@@ -98,14 +99,16 @@ class GameMapper(private val playerMapper: PlayerMapper, private val flagMapper:
 }
 
 @Service
-@Transactional(readOnly = true)
-class GameService(
-    private val gameRepository: GameRepository, private val userRepository: UserRepository,
-    private val sseComponent: SSEComponent, private val gameMapper: GameMapper
+open class GameService(
+    private val gameRepository: GameRepository,
+    private val userRepository: UserRepository,
+    private val sseComponent: SSEComponent,
+    private val gameMapper: GameMapper,
+    private val playerRepository: PlayerRepository
 ) {
 
     @Transactional
-    fun create(playerPayload: PlayerPayload): GameResponse {
+    open fun create(playerPayload: PlayerPayload): GameResponse {
         check (gameRepository.findCurrent(CustomUser.get().userId) == null) {
             "Game already exists"
         }
@@ -134,7 +137,7 @@ class GameService(
     }
 
     @Transactional
-    fun join(url: String, playerPayload: PlayerPayload) {
+    open fun join(url: String, playerPayload: PlayerPayload) {
         val gameEntity = gameRepository.findByUrl(url)
         check (gameEntity != null) {
             "Game not exists"
@@ -146,7 +149,7 @@ class GameService(
     }
 
     @Transactional
-    fun closeGame(id: Long) {
+    open fun closeGame(id: Long) {
         val gameEntity = gameRepository.getReferenceById(id)
         gameEntity.state = GameState.DONE
         gameRepository.save(gameEntity)
@@ -155,7 +158,7 @@ class GameService(
     }
 
     @Transactional
-    fun quitGame(id: Long) {
+    open fun quitGame(id: Long) {
         val gameAndMyPlayer = getGameAndMyPlayer()
         val game = gameAndMyPlayer.game
         game.players.remove(gameAndMyPlayer.player)
@@ -164,6 +167,68 @@ class GameService(
 
     fun getMyPlayer(gameEntity: GameEntity, playerPayload: PlayerPayload): PlayerEntity {
         return gameEntity.players.find { it.user?.id == CustomUser.get().userId } ?: generateMyPlayer(gameEntity, playerPayload)
+    }
+
+    fun getGameAndMyPlayer(): GameAndMyPlayer {
+        val gameEntity = gameRepository.findCurrent(CustomUser.get().userId);
+        val myPlayer = gameEntity?.players?.find { it.user?.id == CustomUser.get().userId }
+
+        check(gameEntity != null) {
+            "No current game"
+        }
+        check(myPlayer != null) {
+            "No current player"
+        }
+
+        return GameAndMyPlayer(gameEntity, myPlayer)
+    }
+
+    @Transactional
+    open fun assignRoles_Navelji(gameId: Long) {
+        val game = gameRepository.getReferenceById(gameId)
+        val players = game.players
+        var minimum = Int.MAX_VALUE
+        val matrix = buildMatrix(players)
+        println(matrixToString(matrix))
+        var tab = IntStream.range(0, matrix.size).toList()
+        val permutations = generatePermutations_Navelji(IntStream.range(0, 8).toList())
+        for (permutation in permutations) {
+            var score = 0
+            for (row in matrix.indices) {
+                score += matrix[row][permutation[row]]
+            }
+            minimum = min(minimum, score)
+            if (minimum == score) {
+                tab = permutation
+            }
+        }
+
+        tab.forEachIndexed { index, i ->
+            if (index < matrix.size) {
+                val role = PlayerRole.entries[i]
+                players[index].role = role
+                println("user $index plays $role")
+            }
+        }
+
+        gameRepository.save(game)
+        sseComponent.notifySSE(game)
+    }
+
+    private fun generatePermutations_Navelji(elems: List<Int>): List<List<Int>> {
+        if (elems.size == 1) {
+            return listOf(elems)
+        }
+
+        val permutations = mutableListOf<List<Int>>()
+        for (idx in elems.indices) {
+            val elem = elems[idx]
+            val remaining = elems.slice(0 until idx) + elems.slice(idx + 1 until elems.size)
+            for (perm in generatePermutations_Navelji(remaining)) {
+                permutations.add(listOf(elem) + perm)
+            }
+        }
+        return permutations
     }
 
     private fun generateMyPlayer(gameEntity: GameEntity, playerPayload: PlayerPayload): PlayerEntity {
@@ -183,20 +248,6 @@ class GameService(
         return playerEntity
     }
 
-    private fun getGameAndMyPlayer(): GameAndMyPlayer {
-        val gameEntity = gameRepository.findCurrent(CustomUser.get().userId);
-        val myPlayer = gameEntity?.players?.find { it.user?.id == CustomUser.get().userId }
-
-        check(gameEntity != null) {
-            "No current game"
-        }
-        check(myPlayer != null) {
-            "No current player"
-        }
-
-        return GameAndMyPlayer(gameEntity, myPlayer)
-    }
-
     class GameAndMyPlayer(val game: GameEntity, val player: PlayerEntity)
 
 }
@@ -204,7 +255,7 @@ class GameService(
 @RestController
 @RequestMapping("/api/games")
 class GameController(
-    private val gameService: GameService, private val sseComponent: SSEComponent
+    private val gameService: GameService, private val sseComponent: SSEComponent,
 ) {
 
     @GetMapping("/me")
@@ -238,6 +289,12 @@ class GameController(
     @DeleteMapping("/{gameId}/players")
     fun quit(@PathVariable gameId: Long) {
         this.gameService.quitGame(gameId)
+    }
+
+    @IsMyGame
+    @GetMapping("/{gameId}/roles")
+    fun assignRoles(@PathVariable gameId: Long) {
+        this.gameService.assignRoles_Navelji(gameId)
     }
 
     @GetMapping("/sse")

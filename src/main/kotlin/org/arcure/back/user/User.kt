@@ -31,16 +31,16 @@ class UserEntity(
 }
 
 @Repository
-interface UserRepository : JpaRepository<UserEntity, Long> {
+open interface UserRepository : JpaRepository<UserEntity, Long> {
     fun findByUsername(username: String): UserEntity?
 }
 
 @Service
 @Transactional(readOnly = true)
-class UserService(val userRepository: UserRepository) {
+open class UserService(private val userRepository: UserRepository) {
 
     @Transactional
-    fun create(credentials: Credentials): UserEntity {
+    open fun create(credentials: Credentials): UserEntity {
 
         val userEntity = UserEntity()
         userEntity.username = credentials.username
@@ -56,7 +56,7 @@ class UserService(val userRepository: UserRepository) {
 
 @RestController
 @RequestMapping("/api/users")
-class UserController(val userService: UserService) {
+class UserController(private val userService: UserService) {
 
     @IsAuthenticated
     @GetMapping("/authentication")

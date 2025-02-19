@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.aopalliance.intercept.MethodInvocation
 import org.arcure.back.game.GameRepository
+import org.arcure.back.game.GameService
 import org.arcure.back.player.PlayerRepository
 import org.arcure.back.token.TokenRepository
 import org.arcure.back.user.UserRepository
@@ -73,6 +74,10 @@ class CustomMethodSecurityExpressionRoot(
         return securityService.isMyToken(gameId, tokenId)
     }
 
+    fun isMyPlayer(gameId: Long, playerId: Long): Boolean {
+        return securityService.isMyPlayer(gameId, playerId)
+    }
+
     override fun setFilterObject(filterObject: Any) {
         this.filterObject = filterObject
     }
@@ -100,7 +105,7 @@ class CustomMethodSecurityExpressionRoot(
 
 @Service
 @Transactional(readOnly = true)
-class SecurityService(
+open class SecurityService(
     private val playerRepository: PlayerRepository, private val tokenRepository: TokenRepository,
     private val gameRepository: GameRepository
 ) {
@@ -120,17 +125,22 @@ class SecurityService(
         return tokenRepository.findByIdAndPlayerId(gameId, myPlayer.id!!) != null
     }
 
+    fun isMyPlayer(gameId: Long, playerId: Long): Boolean {
+        val game = gameRepository.getReferenceById(gameId)
+        return game.players.any { it.id == playerId }
+    }
+
 }
 
 @Configuration
 @EnableWebSecurity
-class SecurityConfig(
+open class SecurityConfig(
     private val customUserDetailService: CustomUserDetailService, private val successHandler: AuthenticationSuccessHandler,
     private val failureHandler: AuthenticationFailureHandler, private val logoutSuccessHandl: LogoutSuccessHandler,
 ) {
 
     @Bean
-    fun filterChain(http: HttpSecurity): SecurityFilterChain {
+    open fun filterChain(http: HttpSecurity): SecurityFilterChain {
         http {
             csrf { disable() }
             authorizeHttpRequests {
@@ -152,7 +162,7 @@ class SecurityConfig(
     }
 
     @Bean
-    fun authenticationManager(httpSecurity: HttpSecurity): AuthenticationManager {
+    open fun authenticationManager(httpSecurity: HttpSecurity): AuthenticationManager {
         val auth = httpSecurity.getSharedObject(
             AuthenticationManagerBuilder::class.java
         )
@@ -161,7 +171,7 @@ class SecurityConfig(
     }
 
     @Bean
-    fun passwordEncoder(): PasswordEncoder {
+    open fun passwordEncoder(): PasswordEncoder {
         return BCryptPasswordEncoder()
     }
 }
@@ -175,7 +185,7 @@ internal class CustomAuthenticationManager(private val authenticationManager: Au
 
 @Service
 @Transactional(readOnly = true)
-class CustomUserDetailService(val userRepository: UserRepository) : UserDetailsService {
+open class CustomUserDetailService(val userRepository: UserRepository) : UserDetailsService {
 
     @Throws(UsernameNotFoundException::class)
     override fun loadUserByUsername(email: String): UserDetails {

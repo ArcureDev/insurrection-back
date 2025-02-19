@@ -1,28 +1,32 @@
 package org.arcure.back.player
 
 import com.fasterxml.jackson.annotation.JsonIgnore
+import io.hypersistence.utils.hibernate.type.json.JsonBinaryType
 import jakarta.persistence.*
+import org.arcure.back.buildMatrix
+import org.arcure.back.config.annotation.IsMyPlayer
 import org.arcure.back.flag.FlagEntity
 import org.arcure.back.flag.FlagMapper
 import org.arcure.back.flag.FlagResponse
 import org.arcure.back.game.*
 import org.arcure.back.getMyPlayer
+import org.arcure.back.matrixToString
 import org.arcure.back.token.TokenEntity
 import org.arcure.back.token.TokenMapper
 import org.arcure.back.token.TokenRepository
 import org.arcure.back.token.TokenResponse
 import org.arcure.back.user.UserEntity
+import org.hibernate.annotations.Type
 import org.springframework.context.annotation.Lazy
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.stereotype.Component
 import org.springframework.stereotype.Repository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import org.springframework.web.bind.annotation.PathVariable
-import org.springframework.web.bind.annotation.PostMapping
-import org.springframework.web.bind.annotation.RequestBody
-import org.springframework.web.bind.annotation.RequestMapping
-import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.bind.annotation.*
+import java.util.stream.IntStream
+import kotlin.math.min
+import kotlin.streams.toList
 
 @Entity
 @Table(name = "player")
@@ -39,6 +43,9 @@ class PlayerEntity(
     var game: GameEntity? = null,
     @ManyToOne
     var user: UserEntity? = null,
+    @Type(JsonBinaryType::class)
+    @Column(columnDefinition = "jsonb")
+    var roles: List<PlayerRole> = mutableListOf(),
     @OneToMany(mappedBy = "player", cascade = [(CascadeType.ALL)], fetch = FetchType.EAGER, orphanRemoval = true)
     var playableTokens: MutableList<TokenEntity> = mutableListOf(),
     @OneToMany(mappedBy = "owner", cascade = [(CascadeType.ALL)], fetch = FetchType.EAGER)
@@ -67,7 +74,8 @@ class PlayerResponse(
     val playableTokens: List<TokenResponse> = mutableListOf(),
     val myTokens: List<TokenResponse> = mutableListOf(),
     val flags: List<FlagResponse> = mutableListOf(),
-    val isMe: Boolean
+    val isMe: Boolean,
+    val roles: List<PlayerRole>
 )
 
 class SimplePlayerResponse(
@@ -89,7 +97,9 @@ class PlayerMapper(
     }
 
     fun toSimpleResponse(player: PlayerEntity?): SimplePlayerResponse? {
-        if (player == null) { return null}
+        if (player == null) {
+            return null
+        }
         return SimplePlayerResponse(
             player.id!!,
             player.name!!,
@@ -107,21 +117,23 @@ class PlayerMapper(
             player.playableTokens.map { tokenMapper.toResponse(it) },
             player.myTokens.map { tokenMapper.toResponse(it) },
             player.flags.map { flagMapper.toResponse(it) },
-            isMe
+            isMe,
+            player.roles
         )
     }
 }
 
+
 @Service
-@Transactional(readOnly = true)
-class PlayerService(
+open class PlayerService(
     private val playerRepository: PlayerRepository,
     private val gameRepository: GameRepository,
     private val tokenRepository: TokenRepository,
+    private val gameService: GameService,
 ) {
 
     @Transactional
-    fun giveToken(gameId: Long, playerId: Long) {
+    open fun giveToken(gameId: Long, playerId: Long) {
         val game = gameRepository.getReferenceById(gameId)
         val player = playerRepository.getReferenceById(playerId)
         val myPlayer = getMyPlayer(game)
@@ -132,12 +144,19 @@ class PlayerService(
     }
 
     @Transactional
-    fun changeColor(gameId: Long, toto: Toto) {
+    open fun changeColor(gameId: Long, color: Color) {
         val game = gameRepository.getReferenceById(gameId)
         val myPlayer = getMyPlayer(game)
 
-        myPlayer.color = toto.color
+        myPlayer.color = color.color
         gameRepository.save(game)
+    }
+
+    @Transactional
+    open fun saveRoles(gameId: Long, roles: List<PlayerRole>) {
+        val player = this.gameService.getGameAndMyPlayer().player;
+        player.roles = roles
+        playerRepository.save(player)
     }
 
     /**
@@ -154,7 +173,7 @@ class PlayerService(
 
 }
 
-class Toto(var color: String)
+class Color(var color: String)
 
 @RestController
 @RequestMapping("/api/games/{gameId}/players")
@@ -168,9 +187,19 @@ class PlayerController(private val playerService: PlayerService, private val gam
         return gameService.getCurrentGameAndNotifyOthers()
     }
 
+    @IsMyPlayer
+    @PostMapping("/{playerId}/roles")
+    fun saveRoles(
+        @PathVariable("gameId") gameId: Long,
+        @PathVariable("playerId") playerId: Long,
+        @RequestBody playerRoles: List<PlayerRole>
+    ) {
+        playerService.saveRoles(gameId, playerRoles)
+    }
+
     @PostMapping("/color")
     fun giveToken(
-        @PathVariable("gameId") gameId: Long, @RequestBody color: Toto
+        @PathVariable("gameId") gameId: Long, @RequestBody color: Color
     ): GameResponse {
         playerService.changeColor(gameId, color)
         return gameService.getCurrentGameAndNotifyOthers()

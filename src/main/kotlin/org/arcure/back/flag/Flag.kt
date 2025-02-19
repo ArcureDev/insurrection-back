@@ -40,7 +40,7 @@ class FlagResponse(
 )
 
 @Component
-class FlagMapper(private val playerMapper: PlayerMapper) {
+open class FlagMapper(private val playerMapper: PlayerMapper) {
 
     fun toResponse(flagEntity: FlagEntity): FlagResponse {
         return FlagResponse(
@@ -54,10 +54,10 @@ class FlagMapper(private val playerMapper: PlayerMapper) {
 
 @Service
 @Transactional(readOnly = true)
-class FlagService(private val gameRepository: GameRepository, private val playerRepository: PlayerRepository) {
+open class FlagService(private val gameRepository: GameRepository, private val playerRepository: PlayerRepository) {
 
     @Transactional
-    fun create(gameId: Long, color: FlagColor) {
+    open fun create(gameId: Long, color: FlagColor) {
         val game = gameRepository.getReferenceById(gameId)
         val myPlayer = getMyPlayer(game)
         val flag = FlagEntity()

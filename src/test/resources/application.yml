@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: back
+  datasource:
+    password: surprise
+    url: jdbc:postgresql://localhost:5432/insurrection_test?useUnicode=true&useJDBCCompliantTimezoneShift=true&useLegacyDatetimeCode=false&serverTimezone=UTC
+    username: postgres
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      connection-timeout: 5000
+      idle-timeout: 300000
+      max-lifetime: 1200000
+      maximum-pool-size: 10
+      minimum-idle: 1
+      leak-detection-threshold: 0
+  flyway:
+    locations: classpath:db/migration
+    password: ${spring.datasource.password}
+    url: ${spring.datasource.url}
+    user: ${spring.datasource.username}
+  jpa:
+    open-in-view: true
+  task:
+    execution:
+      simple:
+        concurrency-limit: 2
+logging:
+  level:
+#    root: WARN
+#    fr.arcure.uniting: INFO
+    org:
+      hibernate:
+        SQL: TRACE
