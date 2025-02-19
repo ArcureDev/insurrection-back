@@ -20,7 +20,6 @@ class BackApplicationTests {
         val players = IntStream.range(0, 8).mapToObj{
             createPlayer(it, getOrderedRoles(it))
         }.toList()
-        this.playerService.toto(players)
     }
 
     @Test
@@ -31,7 +30,6 @@ class BackApplicationTests {
             listOf<PlayerRole>(PAMPHLET, POUVOIR, *getAllRolesExcept(PAMPHLET, POUVOIR).toTypedArray()),
         )
         val players = IntStream.range(0, roles.size).mapToObj { createPlayer(it, roles[it]) }.toList()
-        this.playerService.toto(players)
     }
 
     @Test
