@@ -83,9 +83,8 @@ class GameResponse(
 
 @Component
 class GameMapper(private val playerMapper: PlayerMapper, private val flagMapper: FlagMapper) {
-
-    fun toResponse(game: GameEntity, myPlayer: PlayerEntity): GameResponse {
-        val players = game.players.map { playerMapper.toResponse(it, it.id == myPlayer.id) }.toMutableList()
+    fun toResponse(game: GameEntity, myPlayer: PlayerEntity?): GameResponse {
+        val players = game.players.map { playerMapper.toResponse(it, it.id == myPlayer?.id) }.toMutableList()
 
         return GameResponse(
             game.id!!,
@@ -104,7 +103,6 @@ open class GameService(
     private val userRepository: UserRepository,
     private val sseComponent: SSEComponent,
     private val gameMapper: GameMapper,
-    private val playerRepository: PlayerRepository
 ) {
 
     @Transactional
@@ -119,6 +117,10 @@ open class GameService(
         gameRepository.save(gameEntity)
 
         return gameMapper.toResponse(gameEntity, myPlayer)
+    }
+
+    fun getGame(gameId: Long): GameResponse {
+        return gameMapper.toResponse(gameRepository.getReferenceById(gameId), null)
     }
 
     fun getAllMine(): List<GameEntity> {
@@ -154,7 +156,7 @@ open class GameService(
         gameEntity.state = GameState.DONE
         gameRepository.save(gameEntity)
 
-        sseComponent.notifySSE(gameEntity.players)
+        sseComponent.notifySSE(gameEntity)
     }
 
     @Transactional
@@ -257,6 +259,10 @@ open class GameService(
 class GameController(
     private val gameService: GameService, private val sseComponent: SSEComponent,
 ) {
+    @GetMapping("/{gameId}")
+    fun getGame(@PathVariable gameId: Long): GameResponse {
+        return this.gameService.getGame(gameId)
+    }
 
     @GetMapping("/me")
     fun getAllMine(): List<GameEntity> {
@@ -297,8 +303,8 @@ class GameController(
         this.gameService.assignRoles_Navelji(gameId)
     }
 
-    @GetMapping("/sse")
-    fun subscribe(): SseEmitter {
-        return sseComponent.addSse()
+    @GetMapping("/sse/{gameId}")
+    fun subscribeToGame(@PathVariable gameId: Long): SseEmitter {
+        return sseComponent.addSse(gameId)
     }
 }

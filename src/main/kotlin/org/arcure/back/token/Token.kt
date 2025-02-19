@@ -7,7 +7,6 @@ import org.arcure.back.game.*
 import org.arcure.back.getMyPlayer
 import org.arcure.back.player.PlayerEntity
 import org.arcure.back.player.PlayerMapper
-import org.arcure.back.player.PlayerRepository
 import org.arcure.back.player.SimplePlayerResponse
 import org.springframework.context.annotation.Lazy
 import org.springframework.data.jpa.repository.JpaRepository
