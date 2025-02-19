@@ -58,6 +58,7 @@ enum class TokenType {
 interface TokenRepository : JpaRepository<TokenEntity, Long> {
     fun findByIdAndPlayerId(tokenId: Long, playerId: Long): TokenEntity?
     fun findAllByPlayerIdAndOwnerId(playerId: Long, ownerId: Long): List<TokenEntity>
+    fun findAllByPlayerId(playerId: Long): List<TokenEntity>
 }
 
 class TokenResponse(

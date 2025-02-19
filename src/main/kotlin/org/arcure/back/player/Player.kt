@@ -3,14 +3,12 @@ package org.arcure.back.player
 import com.fasterxml.jackson.annotation.JsonIgnore
 import io.hypersistence.utils.hibernate.type.json.JsonBinaryType
 import jakarta.persistence.*
-import org.arcure.back.buildMatrix
 import org.arcure.back.config.annotation.IsMyPlayer
 import org.arcure.back.flag.FlagEntity
 import org.arcure.back.flag.FlagMapper
 import org.arcure.back.flag.FlagResponse
 import org.arcure.back.game.*
 import org.arcure.back.getMyPlayer
-import org.arcure.back.matrixToString
 import org.arcure.back.token.TokenEntity
 import org.arcure.back.token.TokenMapper
 import org.arcure.back.token.TokenRepository
@@ -24,9 +22,6 @@ import org.springframework.stereotype.Repository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.bind.annotation.*
-import java.util.stream.IntStream
-import kotlin.math.min
-import kotlin.streams.toList
 
 @Entity
 @Table(name = "player")
@@ -61,6 +56,7 @@ enum class PlayerRole {
 @Repository
 interface PlayerRepository : JpaRepository<PlayerEntity, Long> {
     fun findByGameIdAndUserId(gameId: Long, userId: Long): PlayerEntity?
+    fun findByGameIdAndId(gameId: Long, playerId: Long): PlayerEntity?
 }
 
 class PlayerPayload(val name: String, val color: String)
@@ -130,6 +126,8 @@ open class PlayerService(
     private val gameRepository: GameRepository,
     private val tokenRepository: TokenRepository,
     private val gameService: GameService,
+    private val playerMapper: PlayerMapper,
+    private val tokenMapper: TokenMapper,
 ) {
 
     @Transactional
@@ -159,6 +157,10 @@ open class PlayerService(
         playerRepository.save(player)
     }
 
+    open fun getTokens(playerId: Long): List<TokenResponse> {
+        return tokenRepository.findAllByPlayerId(playerId).map { tokenMapper.toResponse(it) }
+    }
+
     /**
      * Take other player's token in priority, connected user's otherwise
      */
@@ -176,10 +178,10 @@ open class PlayerService(
 class Color(var color: String)
 
 @RestController
-@RequestMapping("/api/games/{gameId}/players")
+@RequestMapping("/api")
 class PlayerController(private val playerService: PlayerService, private val gameService: GameService) {
 
-    @PostMapping("/{playerId}/tokens")
+    @PostMapping("/games/{gameId}/players/{playerId}/tokens")
     fun giveToken(
         @PathVariable("gameId") gameId: Long, @PathVariable("playerId") playerId: Long
     ): GameResponse {
@@ -188,7 +190,7 @@ class PlayerController(private val playerService: PlayerService, private val gam
     }
 
     @IsMyPlayer
-    @PostMapping("/{playerId}/roles")
+    @PostMapping("/games/{gameId}/players/{playerId}/roles")
     fun saveRoles(
         @PathVariable("gameId") gameId: Long,
         @PathVariable("playerId") playerId: Long,
@@ -197,12 +199,17 @@ class PlayerController(private val playerService: PlayerService, private val gam
         playerService.saveRoles(gameId, playerRoles)
     }
 
-    @PostMapping("/color")
+    @PostMapping("/games/{gameId}/players/color")
     fun giveToken(
         @PathVariable("gameId") gameId: Long, @RequestBody color: Color
     ): GameResponse {
         playerService.changeColor(gameId, color)
         return gameService.getCurrentGameAndNotifyOthers()
+    }
+
+    @GetMapping("/players/{playerId}/tokens")
+    fun getShardTokens(@PathVariable("playerId") playerId: Long): List<TokenResponse> {
+        return playerService.getTokens(playerId)
     }
 
 }
