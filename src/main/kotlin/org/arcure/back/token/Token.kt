@@ -1,7 +1,7 @@
 package org.arcure.back.token
 
 import jakarta.persistence.*
-import org.arcure.back.config.SSEComponent
+import org.arcure.back.config.WebSocketHandler
 import org.arcure.back.config.annotation.IsMyGame
 import org.arcure.back.game.*
 import org.arcure.back.getMyPlayer
@@ -33,10 +33,6 @@ class TokenEntity(
     @ManyToOne
     var owner: PlayerEntity? = null,
 ) {
-    fun isMine(): Boolean {
-        return player?.id != owner?.id
-    }
-
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other == null || javaClass != other.javaClass) return false
@@ -81,14 +77,13 @@ class TokenMapper(@Lazy private val playerMapper: PlayerMapper) {
 
 @Service
 @Transactional(readOnly = true)
-open class TokenService(
+class TokenService(
     private val gameRepository: GameRepository,
-    private val sseComponent: SSEComponent,
-    private val gameMapper: GameMapper,
+    private val tokenRepository: TokenRepository,
 ) {
 
     @Transactional
-    open fun dealTokens(gameId: Long): GameResponse {
+    fun dealTokens(gameId: Long) {
         val game = gameRepository.getReferenceById(gameId)
         val nbPlayers = game.players.size
 
@@ -100,21 +95,15 @@ open class TokenService(
         }
         game.state = GameState.ON_GOING
         gameRepository.save(game)
-
-        val myPlayer = getMyPlayer(game)
-
-        sseComponent.notifySSE(game)
-
-        return gameMapper.toResponse(game, myPlayer)
     }
 
     @Transactional
-    open fun giveShardToken(gameId: Long) {
+    fun giveShardToken(gameId: Long) {
         val game = gameRepository.getReferenceById(gameId)
         val myPlayer = getMyPlayer(game)
-        val myShardTokens = myPlayer.playableTokens.filter { it.type == TokenType.SHARD }.toMutableList()
+        val myShardToken = myPlayer.playableTokens.find { it.type == TokenType.SHARD }
 
-        check(myShardTokens.isNotEmpty()) {
+        check(myShardToken != null) {
             "No shard token available"
         }
 
@@ -122,13 +111,16 @@ open class TokenService(
             "Shard tokens exceeds maximum of $NB_SHARD_TOKENS_MAX"
         }
 
-        myPlayer.playableTokens.remove(myShardTokens[0])
+        myShardToken.player = null
+        tokenRepository.save(myShardToken)
+
+        myPlayer.playableTokens.remove(myShardToken)
         game.nbAvailableShardTokens++
         gameRepository.save(game)
     }
 
     @Transactional
-    open fun addShardToken(gameId: Long) {
+    fun addShardToken(gameId: Long) {
         val game = gameRepository.getReferenceById(gameId)
         val myPlayer = getMyPlayer(game)
 
@@ -184,23 +176,27 @@ open class TokenService(
 @IsMyGame
 @RestController
 @RequestMapping("/api/games/{gameId}/tokens")
-class TokenController(private val tokenService: TokenService, private val gameService: GameService) {
+class TokenController(
+    private val tokenService: TokenService,
+    private val webSocketHandler: WebSocketHandler,
+) {
 
     @GetMapping
-    fun getTokens(@PathVariable("gameId") gameId: Long): GameResponse {
-        return tokenService.dealTokens(gameId)
+    fun dealTokens(@PathVariable("gameId") gameId: Long) {
+        tokenService.dealTokens(gameId)
+        webSocketHandler.getGameAndNotify(gameId)
     }
 
     @PostMapping
-    fun giveShardToken(@PathVariable("gameId") gameId: Long): GameResponse {
+    fun giveShardToken(@PathVariable("gameId") gameId: Long) {
         tokenService.giveShardToken(gameId)
-        return gameService.getCurrentGameAndNotifyOthers()
+        webSocketHandler.getGameAndNotify(gameId)
     }
 
     @PostMapping("/add")
-    fun addShardToken(@PathVariable("gameId") gameId: Long): GameResponse {
+    fun addShardToken(@PathVariable("gameId") gameId: Long) {
         tokenService.addShardToken(gameId)
-        return gameService.getCurrentGameAndNotifyOthers()
+        webSocketHandler.getGameAndNotify(gameId)
     }
 
 }

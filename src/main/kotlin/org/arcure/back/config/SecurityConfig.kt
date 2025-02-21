@@ -105,7 +105,7 @@ class CustomMethodSecurityExpressionRoot(
 
 @Service
 @Transactional(readOnly = true)
-open class SecurityService(
+class SecurityService(
     private val playerRepository: PlayerRepository, private val tokenRepository: TokenRepository,
     private val gameRepository: GameRepository
 ) {
@@ -134,13 +134,13 @@ open class SecurityService(
 
 @Configuration
 @EnableWebSecurity
-open class SecurityConfig(
+class SecurityConfig(
     private val customUserDetailService: CustomUserDetailService, private val successHandler: AuthenticationSuccessHandler,
     private val failureHandler: AuthenticationFailureHandler, private val logoutSuccessHandl: LogoutSuccessHandler,
 ) {
 
     @Bean
-    open fun filterChain(http: HttpSecurity): SecurityFilterChain {
+    fun filterChain(http: HttpSecurity): SecurityFilterChain {
         http {
             csrf { disable() }
             authorizeHttpRequests {
@@ -162,7 +162,7 @@ open class SecurityConfig(
     }
 
     @Bean
-    open fun authenticationManager(httpSecurity: HttpSecurity): AuthenticationManager {
+    fun authenticationManager(httpSecurity: HttpSecurity): AuthenticationManager {
         val auth = httpSecurity.getSharedObject(
             AuthenticationManagerBuilder::class.java
         )
@@ -171,7 +171,7 @@ open class SecurityConfig(
     }
 
     @Bean
-    open fun passwordEncoder(): PasswordEncoder {
+    fun passwordEncoder(): PasswordEncoder {
         return BCryptPasswordEncoder()
     }
 }
@@ -185,7 +185,7 @@ internal class CustomAuthenticationManager(private val authenticationManager: Au
 
 @Service
 @Transactional(readOnly = true)
-open class CustomUserDetailService(val userRepository: UserRepository) : UserDetailsService {
+class CustomUserDetailService(val userRepository: UserRepository) : UserDetailsService {
 
     @Throws(UsernameNotFoundException::class)
     override fun loadUserByUsername(email: String): UserDetails {
@@ -224,7 +224,7 @@ class AuthenticationFailureHandler(@param:Qualifier("handlerExceptionResolver") 
 }
 
 @Component
-class LogoutSuccessHandler(private val sseComponent: SSEComponent) : SimpleUrlLogoutSuccessHandler() {
+class LogoutSuccessHandler() : SimpleUrlLogoutSuccessHandler() {
     override fun onLogoutSuccess(
         request: HttpServletRequest,
         response: HttpServletResponse,
@@ -232,7 +232,6 @@ class LogoutSuccessHandler(private val sseComponent: SSEComponent) : SimpleUrlLo
     ) {
         val principal = authentication?.principal
         check (principal is CustomUser) { "no principal" }
-        sseComponent.removeSSE(principal.userId)
         response.status = HttpServletResponse.SC_OK
     }
 }

@@ -5,7 +5,7 @@ import jakarta.persistence.*
 import jakarta.validation.Valid
 import jakarta.validation.constraints.Max
 import org.arcure.back.buildMatrix
-import org.arcure.back.config.SSEComponent
+import org.arcure.back.config.WebSocketHandler
 import org.arcure.back.config.annotation.IsMyGame
 import org.arcure.back.flag.FlagMapper
 import org.arcure.back.flag.FlagResponse
@@ -23,7 +23,6 @@ import org.springframework.stereotype.Repository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.bind.annotation.*
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.util.*
 import java.util.stream.IntStream
 import kotlin.math.min
@@ -37,13 +36,13 @@ class GameEntity(
     var id: Long? = null,
     @Max(value = 28)
     var nbAvailableShardTokens: Int = NB_SHARD_TOKENS_MAX - NB_SHARD_TOKENS_START,
+    var nbVotes: Int = 0,
     @OneToMany(mappedBy = "game", cascade = [(CascadeType.ALL)], fetch = FetchType.LAZY, orphanRemoval = true)
     var players: MutableList <PlayerEntity> = mutableListOf(),
     @Enumerated(EnumType.STRING)
     var state: GameState = GameState.START,
     var url: String = UUID.randomUUID().toString()
-) {
-}
+)
 
 enum class GameState {
     START, ON_GOING, DONE
@@ -52,7 +51,7 @@ enum class GameState {
 @Repository
 interface GameRepository : JpaRepository<GameEntity, Long> {
     @Query("""
-        SELECT g.id, g.nb_available_shard_tokens, g.state, g.url
+        SELECT g.id, g.nb_available_shard_tokens, g.nb_votes, g.state, g.url
         FROM game g
         INNER JOIN player p ON p.game_id = g.id
         WHERE p.user_id = :userId
@@ -60,7 +59,7 @@ interface GameRepository : JpaRepository<GameEntity, Long> {
     fun findAllByPlayers(userId: Long): MutableList<GameEntity>
 
     @Query("""
-        SELECT g.id, g.nb_available_shard_tokens, g.state, g.url
+        SELECT g.id, g.nb_available_shard_tokens, g.nb_votes, g.state, g.url
         FROM game g
         INNER JOIN player p ON p.game_id = g.id
         WHERE p.user_id = :userId
@@ -75,6 +74,7 @@ interface GameRepository : JpaRepository<GameEntity, Long> {
 class GameResponse(
     val id: Long,
     val nbAvailableShardTokens: Int,
+    val nbVotes: Int,
     val players: List <PlayerResponse> = mutableListOf(),
     val state: GameState,
     val url: String,
@@ -89,6 +89,7 @@ class GameMapper(private val playerMapper: PlayerMapper, private val flagMapper:
         return GameResponse(
             game.id!!,
             game.nbAvailableShardTokens,
+            game.nbVotes,
             players,
             game.state,
             game.url,
@@ -98,25 +99,24 @@ class GameMapper(private val playerMapper: PlayerMapper, private val flagMapper:
 }
 
 @Service
-open class GameService(
+class GameService(
     private val gameRepository: GameRepository,
     private val userRepository: UserRepository,
-    private val sseComponent: SSEComponent,
     private val gameMapper: GameMapper,
 ) {
 
     @Transactional
-    open fun create(playerPayload: PlayerPayload): GameResponse {
+    fun create(playerPayload: PlayerPayload): GameResponse {
         check (gameRepository.findCurrent(CustomUser.get().userId) == null) {
             "Game already exists"
         }
 
-        val gameEntity = GameEntity()
-        val myPlayer = getMyPlayer(gameEntity, playerPayload)
-        gameEntity.players.add(myPlayer)
-        gameRepository.save(gameEntity)
+        val game = GameEntity()
+        val myPlayer = getMyPlayer(game, playerPayload)
+        game.players.add(myPlayer)
+        gameRepository.save(game)
 
-        return gameMapper.toResponse(gameEntity, myPlayer)
+        return gameMapper.toResponse(game, myPlayer)
     }
 
     fun getGame(gameId: Long): GameResponse {
@@ -132,61 +132,68 @@ open class GameService(
         return gameMapper.toResponse(gameAndMyPlayer.game, gameAndMyPlayer.player)
     }
 
-    fun getCurrentGameAndNotifyOthers(): GameResponse {
-        val gameAndMyPlayer = getGameAndMyPlayer()
-        sseComponent.notifySSE(gameAndMyPlayer.game)
-        return gameMapper.toResponse(gameAndMyPlayer.game, gameAndMyPlayer.player)
+    fun getMyGameOrGame(gameId: Long?): GameResponse {
+        if (CustomUser.getOrNull() == null) {
+            if (gameId == null) throw EntityNotFoundException("Game not found")
+            return getGame(gameId)
+        }
+        return getCurrentGame()
     }
 
     @Transactional
-    open fun join(url: String, playerPayload: PlayerPayload) {
-        val gameEntity = gameRepository.findByUrl(url)
-        check (gameEntity != null) {
+    fun join(url: String, playerPayload: PlayerPayload) {
+        val game = gameRepository.findByUrl(url)
+        check (game != null) {
             "Game not exists"
         }
 
-        val myPlayer = getMyPlayer(gameEntity, playerPayload)
-        gameEntity.players.add(myPlayer)
-        gameRepository.save(gameEntity)
+        val myPlayer = getMyPlayer(game, playerPayload)
+        game.players.add(myPlayer)
+        gameRepository.save(game)
     }
 
     @Transactional
-    open fun closeGame(id: Long) {
-        val gameEntity = gameRepository.getReferenceById(id)
-        gameEntity.state = GameState.DONE
-        gameRepository.save(gameEntity)
-
-        sseComponent.notifySSE(gameEntity)
+    fun closeGame(id: Long) {
+        val game = gameRepository.getReferenceById(id)
+        game.state = GameState.DONE
+        gameRepository.save(game)
     }
 
     @Transactional
-    open fun quitGame(id: Long) {
+    fun quitGame(id: Long) {
         val gameAndMyPlayer = getGameAndMyPlayer()
         val game = gameAndMyPlayer.game
         game.players.remove(gameAndMyPlayer.player)
         gameRepository.save(game)
     }
-
-    fun getMyPlayer(gameEntity: GameEntity, playerPayload: PlayerPayload): PlayerEntity {
-        return gameEntity.players.find { it.user?.id == CustomUser.get().userId } ?: generateMyPlayer(gameEntity, playerPayload)
+    
+    @Transactional
+    fun addVote() {
+        val game = getGame()
+        game.nbVotes++
+        gameRepository.save(game)
     }
 
+    @Transactional
+    fun resetVote() {
+        val game = getGame()
+        game.nbVotes = 0
+        gameRepository.save(game)
+    }
+    
     fun getGameAndMyPlayer(): GameAndMyPlayer {
-        val gameEntity = gameRepository.findCurrent(CustomUser.get().userId);
-        val myPlayer = gameEntity?.players?.find { it.user?.id == CustomUser.get().userId }
+        val game = getGame()
+        val myPlayer = game.players.find { it.user?.id == CustomUser.get().userId }
 
-        check(gameEntity != null) {
-            "No current game"
-        }
         check(myPlayer != null) {
             "No current player"
         }
 
-        return GameAndMyPlayer(gameEntity, myPlayer)
+        return GameAndMyPlayer(game, myPlayer)
     }
 
     @Transactional
-    open fun assignRoles_Navelji(gameId: Long) {
+    fun assignRoles_Navelji(gameId: Long) {
         val game = gameRepository.getReferenceById(gameId)
         val players = game.players
         var minimum = Int.MAX_VALUE
@@ -214,7 +221,6 @@ open class GameService(
         }
 
         gameRepository.save(game)
-        sseComponent.notifySSE(game)
     }
 
     private fun generatePermutations_Navelji(elems: List<Int>): List<List<Int>> {
@@ -233,11 +239,15 @@ open class GameService(
         return permutations
     }
 
-    private fun generateMyPlayer(gameEntity: GameEntity, playerPayload: PlayerPayload): PlayerEntity {
+    private fun getMyPlayer(game: GameEntity, playerPayload: PlayerPayload): PlayerEntity {
+        return game.players.find { it.user?.id == CustomUser.get().userId } ?: generateMyPlayer(game, playerPayload)
+    }
+    
+    private fun generateMyPlayer(game: GameEntity, playerPayload: PlayerPayload): PlayerEntity {
         val user = userRepository.getReferenceById(CustomUser.get().userId)
         val playerEntity = PlayerEntity()
         playerEntity.user = user
-        playerEntity.game = gameEntity
+        playerEntity.game = game
         playerEntity.name = playerPayload.name
         playerEntity.color = playerPayload.color
 
@@ -250,14 +260,18 @@ open class GameService(
         return playerEntity
     }
 
-    class GameAndMyPlayer(val game: GameEntity, val player: PlayerEntity)
+    private fun getGame(): GameEntity {
+        return gameRepository.findCurrent(CustomUser.get().userId) ?: throw EntityNotFoundException()
+    }
+
+    class GameAndMyPlayer(val game: GameEntity, val player: PlayerEntity?)
 
 }
 
 @RestController
 @RequestMapping("/api/games")
 class GameController(
-    private val gameService: GameService, private val sseComponent: SSEComponent,
+    private val gameService: GameService, private val webSocketHandler: WebSocketHandler,
 ) {
     @GetMapping("/{gameId}")
     fun getGame(@PathVariable gameId: Long): GameResponse {
@@ -282,29 +296,42 @@ class GameController(
     @PutMapping
     fun join(@RequestParam url: String, @RequestBody @Valid player: PlayerPayload): GameResponse {
         this.gameService.join(url, player)
-        return this.gameService.getCurrentGameAndNotifyOthers()
+        return this.webSocketHandler.getGameAndNotify(null)
+    }
+
+    @IsMyGame
+    @PostMapping("/me/votes")
+    fun addVote() {
+        this.gameService.addVote()
+        this.webSocketHandler.getGameAndNotify(null)
+    }
+
+    @IsMyGame
+    @DeleteMapping("/me/votes")
+    fun resetVote() {
+        this.gameService.resetVote()
+        this.webSocketHandler.getGameAndNotify(null)
     }
 
     @IsMyGame
     @DeleteMapping("/{gameId}")
     fun close(@PathVariable gameId: Long) {
         this.gameService.closeGame(gameId)
+        this.webSocketHandler.getGameAndNotify(gameId)
     }
 
     @IsMyGame
     @DeleteMapping("/{gameId}/players")
     fun quit(@PathVariable gameId: Long) {
         this.gameService.quitGame(gameId)
+        this.webSocketHandler.getGameAndNotify(gameId)
     }
 
     @IsMyGame
     @GetMapping("/{gameId}/roles")
     fun assignRoles(@PathVariable gameId: Long) {
         this.gameService.assignRoles_Navelji(gameId)
+        this.webSocketHandler.getGameAndNotify(gameId)
     }
 
-    @GetMapping("/sse/{gameId}")
-    fun subscribeToGame(@PathVariable gameId: Long): SseEmitter {
-        return sseComponent.addSse(gameId)
-    }
 }

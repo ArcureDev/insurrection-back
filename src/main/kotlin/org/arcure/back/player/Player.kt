@@ -1,18 +1,19 @@
 package org.arcure.back.player
 
 import com.fasterxml.jackson.annotation.JsonIgnore
+import fr.arcure.uniting.configuration.security.CustomUser
 import io.hypersistence.utils.hibernate.type.json.JsonBinaryType
 import jakarta.persistence.*
+import org.arcure.back.config.WebSocketHandler
 import org.arcure.back.config.annotation.IsMyPlayer
 import org.arcure.back.flag.FlagEntity
 import org.arcure.back.flag.FlagMapper
 import org.arcure.back.flag.FlagResponse
-import org.arcure.back.game.*
+import org.arcure.back.game.GameEntity
+import org.arcure.back.game.GameRepository
+import org.arcure.back.game.GameService
 import org.arcure.back.getMyPlayer
-import org.arcure.back.token.TokenEntity
-import org.arcure.back.token.TokenMapper
-import org.arcure.back.token.TokenRepository
-import org.arcure.back.token.TokenResponse
+import org.arcure.back.token.*
 import org.arcure.back.user.UserEntity
 import org.hibernate.annotations.Type
 import org.springframework.context.annotation.Lazy
@@ -41,7 +42,7 @@ class PlayerEntity(
     @Type(JsonBinaryType::class)
     @Column(columnDefinition = "jsonb")
     var roles: List<PlayerRole> = mutableListOf(),
-    @OneToMany(mappedBy = "player", cascade = [(CascadeType.ALL)], fetch = FetchType.EAGER, orphanRemoval = true)
+    @OneToMany(mappedBy = "player", cascade = [(CascadeType.ALL)], fetch = FetchType.EAGER)
     var playableTokens: MutableList<TokenEntity> = mutableListOf(),
     @OneToMany(mappedBy = "owner", cascade = [(CascadeType.ALL)], fetch = FetchType.EAGER)
     var myTokens: MutableList<TokenEntity> = mutableListOf(),
@@ -121,28 +122,31 @@ class PlayerMapper(
 
 
 @Service
-open class PlayerService(
+class PlayerService(
     private val playerRepository: PlayerRepository,
     private val gameRepository: GameRepository,
     private val tokenRepository: TokenRepository,
     private val gameService: GameService,
-    private val playerMapper: PlayerMapper,
     private val tokenMapper: TokenMapper,
 ) {
 
     @Transactional
-    open fun giveToken(gameId: Long, playerId: Long) {
-        val game = gameRepository.getReferenceById(gameId)
+    fun giveToken(gameId: Long, playerId: Long) {
         val player = playerRepository.getReferenceById(playerId)
-        val myPlayer = getMyPlayer(game)
-        val token = getTokenToGive(player.id!!, myPlayer.id!!)
+        val myPlayer = getMyPlayer(gameId)
+
+        val token = getTokenToGive(myPlayer, playerId) ?: throw EntityNotFoundException()
+        myPlayer.playableTokens.remove(token)
 
         token.player = player
-        gameRepository.save(game)
+        player.playableTokens.add(token)
+
+        playerRepository.save(myPlayer)
+        playerRepository.save(player)
     }
 
     @Transactional
-    open fun changeColor(gameId: Long, color: Color) {
+    fun changeColor(gameId: Long, color: Color) {
         val game = gameRepository.getReferenceById(gameId)
         val myPlayer = getMyPlayer(game)
 
@@ -151,26 +155,30 @@ open class PlayerService(
     }
 
     @Transactional
-    open fun saveRoles(gameId: Long, roles: List<PlayerRole>) {
-        val player = this.gameService.getGameAndMyPlayer().player;
+    fun saveRoles(gameId: Long, roles: List<PlayerRole>) {
+        val player = this.gameService.getGameAndMyPlayer().player ?: return
         player.roles = roles
         playerRepository.save(player)
     }
 
-    open fun getTokens(playerId: Long): List<TokenResponse> {
+    fun getTokens(playerId: Long): List<TokenResponse> {
         return tokenRepository.findAllByPlayerId(playerId).map { tokenMapper.toResponse(it) }
     }
 
     /**
      * Take other player's token in priority, connected user's otherwise
      */
-    private fun getTokenToGive(playerIdToGiveTo: Long, myPlayerId: Long): TokenEntity {
-        val otherPlayerTokens = tokenRepository.findAllByPlayerIdAndOwnerId(myPlayerId, playerIdToGiveTo)
-
-        val token = if (otherPlayerTokens.isNotEmpty()) otherPlayerTokens[0]
-        else tokenRepository.findAllByPlayerIdAndOwnerId(myPlayerId, myPlayerId).first()
-
+    private fun getTokenToGive(myPlayer: PlayerEntity, otherPlayerId: Long): TokenEntity? {
+        val token = myPlayer.playableTokens.find { it.owner?.id == otherPlayerId && it.type === TokenType.INFLUENCE }
+        if (token == null) {
+            return myPlayer.playableTokens.find { it.owner?.id == myPlayer.id && it.type === TokenType.INFLUENCE }
+        }
         return token
+    }
+
+    private fun getMyPlayer(gameId: Long): PlayerEntity {
+        val connectedUserId = CustomUser.get().userId
+        return playerRepository.findByGameIdAndUserId(gameId, connectedUserId) ?: throw EntityNotFoundException()
     }
 
 }
@@ -179,14 +187,17 @@ class Color(var color: String)
 
 @RestController
 @RequestMapping("/api")
-class PlayerController(private val playerService: PlayerService, private val gameService: GameService) {
+class PlayerController(
+    private val playerService: PlayerService,
+    private val webSocketHandler: WebSocketHandler,
+) {
 
     @PostMapping("/games/{gameId}/players/{playerId}/tokens")
     fun giveToken(
         @PathVariable("gameId") gameId: Long, @PathVariable("playerId") playerId: Long
-    ): GameResponse {
-        playerService.giveToken(gameId, playerId)
-        return gameService.getCurrentGameAndNotifyOthers()
+    ) {
+        this.playerService.giveToken(gameId, playerId)
+        this.webSocketHandler.getGameAndNotify(gameId)
     }
 
     @IsMyPlayer
@@ -202,9 +213,9 @@ class PlayerController(private val playerService: PlayerService, private val gam
     @PostMapping("/games/{gameId}/players/color")
     fun giveToken(
         @PathVariable("gameId") gameId: Long, @RequestBody color: Color
-    ): GameResponse {
+    ) {
         playerService.changeColor(gameId, color)
-        return gameService.getCurrentGameAndNotifyOthers()
+        this.webSocketHandler.getGameAndNotify(gameId)
     }
 
     @GetMapping("/players/{playerId}/tokens")

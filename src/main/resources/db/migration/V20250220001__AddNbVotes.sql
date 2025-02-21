@@ -1,0 +1,2 @@
+ALTER TABLE game
+    ADD COLUMN nb_votes BIGINT DEFAULT 0;

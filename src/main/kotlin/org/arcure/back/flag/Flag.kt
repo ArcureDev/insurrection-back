@@ -1,6 +1,7 @@
 package org.arcure.back.flag
 
 import jakarta.persistence.*
+import org.arcure.back.config.WebSocketHandler
 import org.arcure.back.game.GameRepository
 import org.arcure.back.game.GameResponse
 import org.arcure.back.game.GameService
@@ -40,7 +41,7 @@ class FlagResponse(
 )
 
 @Component
-open class FlagMapper(private val playerMapper: PlayerMapper) {
+class FlagMapper(private val playerMapper: PlayerMapper) {
 
     fun toResponse(flagEntity: FlagEntity): FlagResponse {
         return FlagResponse(
@@ -54,10 +55,10 @@ open class FlagMapper(private val playerMapper: PlayerMapper) {
 
 @Service
 @Transactional(readOnly = true)
-open class FlagService(private val gameRepository: GameRepository, private val playerRepository: PlayerRepository) {
+class FlagService(private val gameRepository: GameRepository, private val playerRepository: PlayerRepository) {
 
     @Transactional
-    open fun create(gameId: Long, color: FlagColor) {
+    fun create(gameId: Long, color: FlagColor) {
         val game = gameRepository.getReferenceById(gameId)
         val myPlayer = getMyPlayer(game)
         val flag = FlagEntity()
@@ -72,11 +73,14 @@ open class FlagService(private val gameRepository: GameRepository, private val p
 
 @RestController
 @RequestMapping("/api/games/{gameId}/flags")
-class FlagController(private val flagService: FlagService, private val gameService: GameService) {
+class FlagController(
+    private val flagService: FlagService,
+    private val webSocketHandler: WebSocketHandler,
+) {
 
     @PostMapping
-    fun createFlag(@PathVariable("gameId") gameId: Long, @RequestBody flagColor: FlagColor): GameResponse {
+    fun createFlag(@PathVariable("gameId") gameId: Long, @RequestBody flagColor: FlagColor) {
         flagService.create(gameId, flagColor)
-        return gameService.getCurrentGameAndNotifyOthers()
+        webSocketHandler.getGameAndNotify(gameId)
     }
 }
