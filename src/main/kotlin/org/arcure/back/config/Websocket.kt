@@ -36,6 +36,7 @@ class WebSocketHandler(private val gameService: GameService) : TextWebSocketHand
     override fun handleTextMessage(session: WebSocketSession, message: TextMessage) {
         val gameId = message.payload.toLong()
         sessionsByGameId.getOrPut(gameId) { ArrayList() }.add(session)
+        session.sendMessage(TextMessage(objectMapper.writeValueAsString("Coucou, tu es bien dans la liste ;)")))
     }
 
     fun getGameAndNotify(gameId: Long?): GameResponse {
