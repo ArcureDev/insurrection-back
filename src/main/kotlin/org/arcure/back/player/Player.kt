@@ -132,17 +132,18 @@ class PlayerService(
 
     @Transactional
     fun giveToken(gameId: Long, playerId: Long) {
-        val player = playerRepository.getReferenceById(playerId)
         val myPlayer = getMyPlayer(gameId)
+        val token = myPlayer.playableTokens.find { it.owner?.id == playerId && it.type === TokenType.INFLUENCE }
+        if (token == null) return
+        giveToken(playerId, gameId, token)
+    }
 
-        val token = getTokenToGive(myPlayer, playerId) ?: throw EntityNotFoundException()
-        myPlayer.playableTokens.remove(token)
-
-        token.player = player
-        player.playableTokens.add(token)
-
-        playerRepository.save(myPlayer)
-        playerRepository.save(player)
+    @Transactional
+    fun giveMyToken(gameId: Long, playerId: Long) {
+        val myPlayer = getMyPlayer(gameId)
+        val token = myPlayer.playableTokens.find { it.owner?.id == myPlayer.id && it.type === TokenType.INFLUENCE }
+        if (token == null) return
+        giveToken(playerId, gameId, token)
     }
 
     @Transactional
@@ -165,20 +166,22 @@ class PlayerService(
         return tokenRepository.findAllByPlayerId(playerId).map { tokenMapper.toResponse(it) }
     }
 
-    /**
-     * Take other player's token in priority, connected user's otherwise
-     */
-    private fun getTokenToGive(myPlayer: PlayerEntity, otherPlayerId: Long): TokenEntity? {
-        val token = myPlayer.playableTokens.find { it.owner?.id == otherPlayerId && it.type === TokenType.INFLUENCE }
-        if (token == null) {
-            return myPlayer.playableTokens.find { it.owner?.id == myPlayer.id && it.type === TokenType.INFLUENCE }
-        }
-        return token
-    }
-
     private fun getMyPlayer(gameId: Long): PlayerEntity {
         val connectedUserId = CustomUser.get().userId
         return playerRepository.findByGameIdAndUserId(gameId, connectedUserId) ?: throw EntityNotFoundException()
+    }
+
+    private fun giveToken(playerId: Long, gameId: Long, token: TokenEntity) {
+        val player = playerRepository.getReferenceById(playerId)
+        val myPlayer = getMyPlayer(gameId)
+
+        myPlayer.playableTokens.remove(token)
+
+        token.player = player
+        player.playableTokens.add(token)
+
+        playerRepository.save(myPlayer)
+        playerRepository.save(player)
     }
 
 }
@@ -191,6 +194,14 @@ class PlayerController(
     private val playerService: PlayerService,
     private val webSocketHandler: WebSocketHandler,
 ) {
+
+    @PostMapping("/games/{gameId}/players/{playerId}/tokens/me")
+    fun giveMyToken(
+        @PathVariable("gameId") gameId: Long, @PathVariable("playerId") playerId: Long
+    ) {
+        this.playerService.giveMyToken(gameId, playerId)
+        this.webSocketHandler.getGameAndNotify(gameId)
+    }
 
     @PostMapping("/games/{gameId}/players/{playerId}/tokens")
     fun giveToken(
@@ -211,7 +222,7 @@ class PlayerController(
     }
 
     @PostMapping("/games/{gameId}/players/color")
-    fun giveToken(
+    fun changeColor(
         @PathVariable("gameId") gameId: Long, @RequestBody color: Color
     ) {
         playerService.changeColor(gameId, color)
