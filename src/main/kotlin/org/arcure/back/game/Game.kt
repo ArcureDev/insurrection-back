@@ -85,6 +85,7 @@ class GameResponse(
 class GameMapper(private val playerMapper: PlayerMapper, private val flagMapper: FlagMapper) {
     fun toResponse(game: GameEntity, myPlayer: PlayerEntity?): GameResponse {
         val players = game.players.map { playerMapper.toResponse(it, it.id == myPlayer?.id) }.toMutableList()
+        val flags = game.players.flatMap { it.flags }.map { flagMapper.toResponse(it) }
 
         return GameResponse(
             game.id!!,
@@ -93,7 +94,7 @@ class GameMapper(private val playerMapper: PlayerMapper, private val flagMapper:
             players,
             game.state,
             game.url,
-            game.players.flatMap { it.flags }.map { flagMapper.toResponse(it) }
+            flags
         )
     }
 }

@@ -31,13 +31,13 @@ class FlagEntity(
 enum class FlagColor { RED, BLACK }
 
 @Repository
-interface FlagRepository : JpaRepository<FlagEntity, Long> {}
+interface FlagRepository : JpaRepository<FlagEntity, Long>
 
 class FlagResponse(
-    id: Long? = null,
-    playerResponse: SimplePlayerResponse? = null,
-    color: FlagColor? = null,
-    date: LocalDateTime? = null,
+    val id: Long?,
+    val playerResponse: SimplePlayerResponse?,
+    val color: FlagColor?,
+    val date: LocalDateTime?,
 )
 
 @Component
@@ -77,7 +77,6 @@ class FlagController(
     private val flagService: FlagService,
     private val webSocketHandler: WebSocketHandler,
 ) {
-
     @PostMapping
     fun createFlag(@PathVariable("gameId") gameId: Long, @RequestBody flagColor: FlagColor) {
         flagService.create(gameId, flagColor)

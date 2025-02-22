@@ -215,7 +215,7 @@ class PlayerController(
         @PathVariable("gameId") gameId: Long, @RequestBody color: Color
     ) {
         playerService.changeColor(gameId, color)
-        this.webSocketHandler.getGameAndNotify(gameId)
+        webSocketHandler.getGameAndNotify(gameId)
     }
 
     @GetMapping("/players/{playerId}/tokens")
